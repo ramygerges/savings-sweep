@@ -50,6 +50,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     background: var(--bg);
@@ -178,6 +179,28 @@
   .name:hover { border-color: var(--line); }
   .name:focus { outline: none; border-color: var(--accent); background: var(--bg); }
   .name::placeholder, .amt::placeholder { color: var(--muted); opacity: 0.7; }
+  .row-main { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+  /* Due day, or how often and which day a deposit lands, as small text under the name. An
+     invisible native select sits on each so tapping it opens the phone's own picker. */
+  .when-line { display: flex; flex-wrap: wrap; column-gap: 12px; margin: -6px 0 0 9px; }
+  .when {
+    position: relative;
+    padding: 2px 0 4px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .when::after { content: " ▾"; }
+  .when.unset { color: var(--accent); font-weight: 600; }
+  .when select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    opacity: 0;
+    font-size: 16px; /* 16px keeps iOS from zooming on focus */
+    cursor: pointer;
+  }
+  .when:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   .money { position: relative; }
   .money span {
     position: absolute;
@@ -320,9 +343,11 @@
     <p class="note" id="note" hidden></p>
     <dl class="math">
       <div><dt>Checking</dt><dd id="mChecking">$0.00</dd></div>
+      <div><dt id="mIncomeLabel">Coming in</dt><dd id="mIncome">$0.00</dd></div>
       <div><dt>Cards still to be paid</dt><dd id="mCards">$0.00</dd></div>
       <div><dt>Other payments</dt><dd id="mBills">$0.00</dd></div>
       <div><dt>Cushion you keep</dt><dd id="mCushion">$0.00</dd></div>
+      <div id="mHeldRow" hidden><dt id="mHeldLabel">Not free yet</dt><dd id="mHeld">$0.00</dd></div>
     </dl>
   </section>
 
@@ -338,6 +363,13 @@
     </ul>
   </section>
 
+  <section class="group" aria-labelledby="incomeTitle">
+    <div class="group-head"><h2 id="incomeTitle">Coming in</h2><span class="sum" id="incomeSum">$0.00</span></div>
+    <p class="hint">Counted from tomorrow through your last due date.</p>
+    <ul class="rows" id="income"></ul>
+    <button class="add" type="button" data-add="income">+ Add deposit</button>
+  </section>
+
   <section class="group" aria-labelledby="cardsTitle">
     <div class="group-head"><h2 id="cardsTitle">Cards</h2><span class="sum" id="cardsSum">$0.00</span></div>
     <p class="hint">Each card's unpaid <strong>statement balance</strong>.</p>
@@ -347,7 +379,7 @@
 
   <section class="group" aria-labelledby="billsTitle">
     <div class="group-head"><h2 id="billsTitle">Other payments</h2><span class="sum" id="billsSum">$0.00</span></div>
-    <p class="hint">Anything else paid straight from checking before your next paycheck, like a loan, a utility, or rent if it hasn't cleared yet.</p>
+    <p class="hint">Anything else paid from checking, like a loan, a utility, or rent that hasn't cleared.</p>
     <ul class="rows" id="bills"></ul>
     <button class="add" type="button" data-add="bills">+ Add payment</button>
   </section>
@@ -365,7 +397,7 @@
 
   <div class="actions">
     <button class="ghost" id="clearBtn" type="button">Clear amounts</button>
-    <p>Tap a name to rename it, or × to remove it. Your list and cushion stay saved.</p>
+    <p>Tap a name to rename it, or × to remove it. Your list, due days, paychecks and cushion stay saved.</p>
   </div>
 
   <footer class="foot">Your numbers are saved in this browser on this device only. Nothing is sent anywhere.</footer>
@@ -397,6 +429,9 @@
       ],
       bills: [
         { id: 'rent', name: 'Rent, if unpaid', cents: null }
+      ],
+      income: [
+        { id: 'pay', name: 'Paycheck', cents: null, freq: 'week', on: '' }
       ]
     };
   }
@@ -417,6 +452,14 @@
           s.bills.forEach((b) => { b.cents = null; });
           delete s.sample;
         }
+        if (!Array.isArray(s.income)) s.income = defaults().income;
+        // Deposits used to carry a single date; keep one as a one-time deposit
+        s.income.forEach((r) => {
+          if (r.freq) return;
+          r.freq = r.date ? 'once' : 'week';
+          r.on = r.date || '';
+          delete r.date;
+        });
         return s;
       }
     } catch (e) {}
@@ -448,15 +491,107 @@
   }
   const total = (rows) => rows.reduce((t, r) => t + (r.cents || 0), 0);
 
+  // Dates are local calendar days. Cards and payments store a day of the month and fall due on
+  // its next occurrence, today included. Deposits store how often they repeat (`freq`) and which
+  // day (`on`): a weekday 0-6 for 'week', a day of the month for 'month', and a YYYY-MM-DD date
+  // for 'once' or for '2weeks', where it is any one payday and the rest are 14 days apart.
+  function startOfToday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const onDay = (y, m, day) => new Date(y, m, Math.min(day, new Date(y, m + 1, 0).getDate()));
+  function isoDay(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function parseDay(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+  }
+  function nextDue(day, today) {
+    if (!day) return today;
+    const d = onDay(today.getFullYear(), today.getMonth(), day);
+    return d >= today ? d : onDay(today.getFullYear(), today.getMonth() + 1, day);
+  }
+  // A deposit's first landing after today, or null if it has none
+  function firstAfter(r, today) {
+    if (!r.on) return null;
+    if (r.freq === 'week') return addDays(today, (Number(r.on) - today.getDay() + 7) % 7 || 7);
+    if (r.freq === 'month') {
+      const d = onDay(today.getFullYear(), today.getMonth(), Number(r.on));
+      return d > today ? d : onDay(today.getFullYear(), today.getMonth() + 1, Number(r.on));
+    }
+    let d = parseDay(r.on);
+    if (!d) return null;
+    if (r.freq === 'once') return d > today ? d : null;
+    while (d <= today) d = addDays(d, 14);
+    while (addDays(d, -14) > today) d = addDays(d, -14);
+    return d;
+  }
+  function nextLanding(r, d) {
+    if (r.freq === 'week') return addDays(d, 7);
+    if (r.freq === '2weeks') return addDays(d, 14);
+    if (r.freq === 'month') return onDay(d.getFullYear(), d.getMonth() + 1, Number(r.on));
+    return null;
+  }
+  const shortDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const longDate = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  function ordinal(n) {
+    return n + (n >= 11 && n <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+  }
+
+  // Walks the coming days in order: checking, plus each deposit on every day it lands, minus
+  // each card and payment on its due day. Money moved today lowers every later day too, so what
+  // can move today is the lowest point minus the cushion. Deposits count from tomorrow through
+  // the last due date (one landing today is taken to be in checking already; later ones belong
+  // to the next run). A row with no due day counts as due today, and on a shared day payments
+  // go first.
   function compute() {
+    const today = startOfToday();
     const checking = state.checking || 0;
-    const cards = total(state.cards);
-    const bills = total(state.bills);
     const cushion = state.cushion || 0;
-    const afterDue = checking - cards - bills;
-    const sweep = afterDue - cushion;
-    const status = state.checking == null ? 'empty' : sweep > 0 ? 'ok' : afterDue >= 0 ? 'cushion' : 'short';
-    return { checking, cards, bills, cushion, afterDue, sweep, status };
+    const events = [];
+    let end = today;
+    state.cards.concat(state.bills).forEach((r) => {
+      if (!r.cents) return;
+      const d = nextDue(r.due, today);
+      if (d > end) end = d;
+      events.push({ date: d, cents: -r.cents });
+    });
+    let income = 0;
+    const landings = [];
+    state.income.forEach((r) => {
+      if (!r.cents) return;
+      for (let d = firstAfter(r, today); d && d <= end; d = nextLanding(r, d)) {
+        income += r.cents;
+        landings.push(d);
+        events.push({ date: d, cents: r.cents });
+      }
+    });
+    landings.sort((a, b) => a - b);
+    events.sort((a, b) => a.date - b.date || a.cents - b.cents);
+
+    let bal = checking, low = checking, lowDate = today;
+    events.forEach((e) => {
+      bal += e.cents;
+      e.bal = bal;
+      if (bal < low) { low = bal; lowDate = e.date; }
+    });
+    // The end balance is all free from the earliest day after which checking never dips below it
+    let freeDate = null, floor = Infinity;
+    for (let i = events.length - 1; i >= 0; i--) {
+      floor = Math.min(floor, events[i].bal);
+      if (floor === bal) freeDate = events[i].date;
+    }
+
+    const sweep = low - cushion;
+    const later = bal - cushion - Math.max(sweep, 0);
+    const status = state.checking == null ? 'empty' : sweep > 0 ? 'ok' : low >= 0 ? 'cushion' : 'short';
+    return {
+      today, checking, income, landings, cards: total(state.cards), bills: total(state.bills), cushion,
+      low, lowDate, sweep, later, freeDate, status
+    };
   }
 
   let current = compute();
@@ -465,12 +600,19 @@
     const r = compute();
     current = r;
     $('mChecking').textContent = money(r.checking);
+    const n = r.landings.length;
+    $('mIncomeLabel').textContent = 'Coming in'
+      + (n > 2 ? ' (' + n + ' deposits)' : n ? ' (' + r.landings.map(shortDate).join(', ') + ')' : '');
+    $('mIncome').textContent = (r.income ? '+' : '') + money(r.income);
     $('mCards').textContent = money(-r.cards);
     $('mBills').textContent = money(-r.bills);
     $('mCushion').textContent = money(-r.cushion);
+    $('incomeSum').textContent = money(r.income);
     $('cardsSum').textContent = money(r.cards);
     $('billsSum').textContent = money(r.bills);
 
+    const lowOn = r.lowDate > r.today ? ' on ' + longDate(r.lowDate) : '';
+    const freesOn = r.later > 0 ? ' frees up on ' + longDate(r.freeDate) + '.' : '';
     let label, amount, note;
     if (r.status === 'empty') {
       label = 'Move to savings';
@@ -479,15 +621,26 @@
     } else if (r.status === 'ok') {
       label = 'Move to savings';
       amount = money(r.sweep);
-      note = 'This leaves ' + money(r.cards + r.bills) + ' for what is still due, plus your ' + money(r.cushion) + ' cushion.';
+      if (freesOn) note = 'Another ' + money(r.later) + freesOn;
+      else if (r.income) note = 'Counts the ' + money(r.income) + ' coming in, which lands in time for what is due.';
+      else note = 'This leaves ' + money(r.cards + r.bills) + ' for what is still due, plus your ' + money(r.cushion) + ' cushion.';
     } else if (r.status === 'cushion') {
       label = 'Nothing to move yet';
       amount = money(0);
-      note = 'After cards and other payments you would have ' + money(r.afterDue) + ' left, which is under your ' + money(r.cushion) + ' cushion.';
+      note = 'Checking dips to ' + money(r.low) + lowOn
+        + (r.cushion ? ', at or under your ' + money(r.cushion) + ' cushion.' : '.')
+        + (freesOn ? ' ' + money(r.later) + freesOn : '');
     } else {
       label = 'Short this month';
-      amount = money(r.afterDue);
-      note = 'Checking is ' + money(-r.afterDue) + ' short of what your cards and other payments will pull. Top it up before they do.';
+      amount = money(r.low);
+      note = 'Checking runs ' + money(-r.low) + ' short'
+        + (lowOn ? lowOn + '. Top it up before then.' : '. Top it up before your payments go out.');
+    }
+    const held = r.later > 0 && (r.status === 'ok' || r.status === 'cushion');
+    $('mHeldRow').hidden = !held;
+    if (held) {
+      $('mHeldLabel').textContent = 'Not free until ' + shortDate(r.freeDate);
+      $('mHeld').textContent = money(-r.later);
     }
     $('result').dataset.state = r.status;
     $('bar').dataset.state = r.status;
@@ -500,11 +653,87 @@
     $('copyBtn').hidden = r.status !== 'ok';
   }
 
+  const KINDS = ['income', 'cards', 'bills'];
+  const NOUN = { income: 'Deposit', cards: 'Card', bills: 'Payment' };
+  const EMPTY = { income: 'Nothing coming in.', cards: 'No cards yet.', bills: 'No other payments.' };
+
+  const FREQ = { week: 'Weekly', '2weeks': 'Every 2 weeks', month: 'Monthly', once: 'One time' };
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function picker(cls, ariaLabel, options, value) {
+    const label = document.createElement('label');
+    label.className = 'when';
+    const sel = document.createElement('select');
+    sel.className = cls;
+    sel.setAttribute('aria-label', ariaLabel);
+    options.forEach(([v, text]) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = text;
+      sel.append(o);
+    });
+    sel.value = value;
+    label.append(document.createElement('span'), sel);
+    return label;
+  }
+
+  // The line under each name: the due day for cards and payments; how often and which day for
+  // deposits
+  function whenLine(kind, r) {
+    const line = document.createElement('div');
+    line.className = 'when-line';
+    const today = startOfToday();
+    if (kind === 'income') {
+      const days = [['', r.freq === 'once' ? 'Pick a date' : 'Pick a day']];
+      if (r.freq === 'week') WEEKDAYS.forEach((w, i) => days.push([String(i), w]));
+      else if (r.freq === 'month') for (let n = 1; n <= 31; n++) days.push([String(n), 'The ' + ordinal(n)]);
+      else for (let i = 1; i <= (r.freq === '2weeks' ? 14 : 62); i++) days.push([isoDay(addDays(today, i)), longDate(addDays(today, i))]);
+      // For every 2 weeks the stored date may be any payday; the picker shows the next one
+      const next = firstAfter(r, today);
+      line.append(
+        picker('freq-select', (r.name || 'Deposit') + ' frequency', Object.entries(FREQ), r.freq),
+        picker('on-select', (r.name || 'Deposit') + ' day', days, r.freq === '2weeks' && next ? isoDay(next) : r.on)
+      );
+    } else {
+      const days = [['', 'No due day']];
+      for (let n = 1; n <= 31; n++) days.push([String(n), 'Due on the ' + ordinal(n)]);
+      line.append(picker('due-select', (r.name || NOUN[kind]) + ' due day', days, r.due ? String(r.due) : ''));
+    }
+    setWhen(line, kind, r);
+    return line;
+  }
+  function setWhen(line, kind, r) {
+    const today = startOfToday();
+    const [first, second] = line.children;
+    if (kind !== 'income') {
+      first.firstChild.textContent = r.due ? 'Due ' + shortDate(nextDue(r.due, today)) : 'Set due day';
+      return;
+    }
+    const next = firstAfter(r, today);
+    let text;
+    if (!r.on) text = r.freq === 'once' ? 'Set date' : 'Set day';
+    else if (r.freq === 'week') text = WEEKDAYS[r.on] + 's';
+    else if (r.freq === 'month') text = 'the ' + ordinal(Number(r.on));
+    else if (r.freq === '2weeks') text = 'next ' + shortDate(next);
+    else text = next ? shortDate(next) : 'Landed ' + shortDate(parseDay(r.on));
+    first.firstChild.textContent = FREQ[r.freq];
+    second.firstChild.textContent = text;
+    second.classList.toggle('unset', !next);
+  }
+  // Keeps the same next payday when switching how often a deposit repeats
+  function carryOver(r, freq) {
+    const next = firstAfter(r, startOfToday());
+    if (!next) return '';
+    if (freq === 'week') return String(next.getDay());
+    if (freq === 'month') return String(next.getDate());
+    return isoDay(next);
+  }
+
   function rowEl(kind, r) {
     const li = document.createElement('li');
     li.className = 'row';
     li.dataset.id = r.id;
-    const noun = kind === 'cards' ? 'Card' : 'Payment';
+    const noun = NOUN[kind];
 
     const name = document.createElement('input');
     name.className = 'name';
@@ -514,6 +743,10 @@
     name.value = r.name;
     name.placeholder = noun + ' name';
     name.setAttribute('aria-label', noun + ' name');
+
+    const main = document.createElement('div');
+    main.className = 'row-main';
+    main.append(name, whenLine(kind, r));
 
     const wrap = document.createElement('div');
     wrap.className = 'money';
@@ -536,7 +769,7 @@
     del.textContent = '×';
     del.setAttribute('aria-label', 'Remove ' + (r.name || noun.toLowerCase()));
 
-    li.append(name, wrap, del);
+    li.append(main, wrap, del);
     return li;
   }
 
@@ -546,7 +779,7 @@
     if (!state[kind].length) {
       const li = document.createElement('li');
       li.className = 'row empty';
-      li.textContent = kind === 'cards' ? 'No cards yet.' : 'No other payments.';
+      li.textContent = EMPTY[kind];
       ul.append(li);
       return;
     }
@@ -558,13 +791,32 @@
     return li && state[kind].find((x) => x.id === li.dataset.id);
   }
 
-  ['cards', 'bills'].forEach((kind) => {
+  KINDS.forEach((kind) => {
     const ul = $(kind);
     ul.addEventListener('input', (e) => {
       const row = findRow(kind, e.target);
       if (!row) return;
       if (e.target.classList.contains('name')) row.name = e.target.value;
-      else row.cents = parseCents(e.target.value, false);
+      else if (e.target.classList.contains('amt')) row.cents = parseCents(e.target.value, false);
+      else return;
+      save();
+      update();
+    });
+    ul.addEventListener('change', (e) => {
+      const t = e.target;
+      const row = findRow(kind, t);
+      if (!row || t.tagName !== 'SELECT') return;
+      const line = t.closest('.when-line');
+      if (t.classList.contains('freq-select')) {
+        row.on = carryOver(row, t.value);
+        row.freq = t.value;
+        // The day choices depend on how often, so rebuild the line
+        line.replaceWith(whenLine(kind, row));
+      } else {
+        if (t.classList.contains('due-select')) row.due = t.value ? Number(t.value) : null;
+        else row.on = t.value;
+        setWhen(line, kind, row);
+      }
       save();
       update();
     });
@@ -583,7 +835,7 @@
       save();
       renderList(kind);
       update();
-      toast('Removed ' + (row.name || (kind === 'cards' ? 'card' : 'payment')), () => {
+      toast('Removed ' + (row.name || NOUN[kind].toLowerCase()), () => {
         state[kind].splice(Math.min(index, state[kind].length), 0, row);
         save();
         renderList(kind);
@@ -596,6 +848,7 @@
     btn.addEventListener('click', () => {
       const kind = btn.dataset.add;
       const r = { id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: '', cents: null };
+      if (kind === 'income') Object.assign(r, { freq: 'week', on: '' });
       state[kind].push(r);
       save();
       renderList(kind);
@@ -612,11 +865,10 @@
     el.addEventListener('blur', () => { el.value = toInput(state[key]); });
   });
 
-  // Clears balances but keeps the list of names and the cushion.
+  // Clears balances but keeps the names, due days, paychecks and cushion.
   function clearAmounts() {
     state.checking = null;
-    state.cards.forEach((c) => { c.cents = null; });
-    state.bills.forEach((b) => { b.cents = null; });
+    state.cards.concat(state.bills).forEach((r) => { r.cents = null; });
     save();
     $('checking').value = '';
     document.querySelectorAll('#cards .amt, #bills .amt').forEach((i) => { i.value = ''; });
@@ -669,8 +921,7 @@
     }).observe($('result'));
   }
 
-  renderList('cards');
-  renderList('bills');
+  KINDS.forEach(renderList);
   update();
 })();
 </script>

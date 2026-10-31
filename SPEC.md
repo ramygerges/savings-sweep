@@ -6,19 +6,25 @@
 
 ## 1. Problem
 
-I'm paid monthly. At the start of each month I want to move whatever is left of last month's
-pay into savings. Rent and my Bank of America card are paid by the 1st. My two Amex cards and
-my Amazon credit account are paid later (around the 9th and the 12th), so on the 1st my
-checking account still holds money that is already spoken for. Working out each card's
-statement balance by hand is tedious and error-prone.
+At the start of each month I want to move whatever is left of last month's pay into savings.
+Rent and my Bank of America card are paid by the 1st. My two Amex cards and my Amazon credit
+account are paid later (around the 9th and the 12th), so on the 1st my checking account still
+holds money that is already spoken for. A paycheck that lands before those due dates covers part
+of them, so I can move more than checking alone suggests, but only if it lands in time. Working
+out each card's statement balance, and whether each paycheck lands in time, by hand is tedious
+and error-prone.
 
 ## 2. The rule
 
+Walk the days from today through the last due date, in date order:
+
 ```
-safe_to_move = checking_available
-             − sum(unpaid statement balance of every card)
-             − sum(other payments made from checking before the next payday)
-             − cushion
+balance = checking_available
+        + each expected deposit, on the day it lands
+        − each card's unpaid statement balance, on its due date
+        − each other payment from checking, on its due date
+
+safe_to_move_today = lowest balance on any of those days − cushion
 ```
 
 - Use each card's **unpaid statement balance**: the last statement's balance minus any payments
@@ -27,10 +33,21 @@ safe_to_move = checking_available
 - Charges made after a statement closed are left out. They land on next month's statement and
   come out of next month's pay.
 - Cards already paid (Bank of America, usually Bilt) simply show $0.
+- A deposit counts only from the day it lands. One that lands before a card is due covers it;
+  one that lands after doesn't help that card. Money moved today lowers the balance on every
+  later day too, so the lowest point, not the end balance, sets today's amount.
+- When the end balance minus the cushion is more than today's amount, the rest frees up once
+  the deposit that lifts the low point lands. Report it: "Another $1,605.00 frees up on Fri
+  Nov 13."
+- Err on the side of moving less: a deposit dated today or earlier is already in
+  `checking_available`, so don't count it again; on a day with both, payments go out before
+  deposits land; deposits after the last due date belong to the next run.
 - Three outcomes:
-  - `ok`: result > 0. Move that amount.
-  - `cushion`: checking covers cards and other payments, but not the cushion. Move nothing.
-  - `short`: checking can't cover cards and other payments. Show the shortfall prominently.
+  - `ok`: `safe_to_move_today` > 0. Move that amount.
+  - `cushion`: the balance never goes negative, but its lowest point doesn't clear the cushion.
+    Move nothing today, and still report what frees up later.
+  - `short`: the balance goes negative on some day. Show the shortfall and that day
+    prominently.
 
 ## 3. My accounts
 
@@ -43,7 +60,8 @@ safe_to_move = checking_available
 | Amazon credit account | card     | after the 1st            | Issuer may be Synchrony. Might not connect through an aggregator, so it may need manual entry. |
 | Bilt                  | card     | rent only                | Include it anyway; normally $0.                        |
 
-Ask me each card's statement closing day and due day before writing my real config.
+Ask me each card's statement closing day and due day, and my pay schedule (how often, which day
+and the usual amount), before writing my real config.
 
 This list will change: cards get opened and cancelled, and I may add other payment
 destinations like a loan. Adding or removing one must be a single command (see 4), never a
@@ -60,9 +78,11 @@ sweep accounts   # list accounts found by the data source with ids and raw balan
 sweep setup      # one-time: paste a SimpleFIN setup token, store the access URL securely
 sweep --json     # machine-readable output (for a notification later)
 
-sweep list                                           # show checking, cards and payments
+sweep list                                           # show checking, cards, payments and income
 sweep add card "Chase Sapphire"                      # add a card (prompts to link it, see below)
 sweep add payment "Car loan" --amount 320 --due-day 15
+sweep add income "Paycheck" --amount 1700 --every week --day friday
+sweep add income "Tax refund" --amount 900 --once 2026-11-20
 sweep rename "Amex Gold" "Amex Gold (old)"
 sweep remove "Amex Gold"                             # asks to confirm first
 ```
@@ -73,8 +93,14 @@ sweep remove "Amex Gold"                             # asks to confirm first
 - `payment`: a fixed amount on a due day, paid straight from checking (loan, utility, rent
   that hasn't cleared).
 
+**Income** is money expected to land in checking. All I give it is how often and which day:
+`--every week --day friday`, `--every month --day 15`, `--every "2 weeks" --day 2026-11-13`
+(any one payday) or `--once 2026-11-20`. Without flags, `sweep add income` asks those two
+questions. It works out every future date itself. The amount is what I usually get.
+
 `sweep add card` lists the SimpleFIN accounts not yet in config and lets me pick one, or choose
-"enter by hand" (`source = "manual"`). `add`, `rename` and `remove` edit `config.toml` with
+"enter by hand" (`source = "manual"`), then asks for the card's due day and statement closing
+day. `add`, `rename` and `remove` edit `config.toml` with
 `tomlkit` so my comments and ordering survive, and write a `config.toml.bak` first. Name
 matching is case-insensitive. An unknown name lists the names that do exist.
 
@@ -84,19 +110,28 @@ matching is case-insensitive. An unknown name lists the names that do exist.
 Savings sweep · Sun Nov 1, 2026          balances as of Nov 1, 8:12 AM
 
 Checking                                   6,850.00
+Coming in
+  Paycheck (Fri Nov 13)                   +1,700.00
 Cards
-  Bank of America                              0.00
-  Amex Platinum                            1,240.18
-  Amex Gold                                  386.40
-  Amazon credit (entered by hand)            212.75
-  Bilt                                         0.00
+  Bank of America (due Nov 1)                  0.00
+  Amex Platinum (due Nov 9)                1,240.18
+  Amex Gold (due Nov 9)                      386.40
+  Amazon credit (due Nov 12, by hand)        212.75
+  Bilt (due Nov 1)                             0.00
                                           −1,839.33
-Other payments before next payday
-  Utilities (Nov 15)                         −95.00
+Other payments
+  Utilities (due Nov 15)                     −95.00
 Cushion                                     −500.00
+Not free until Nov 13                     −1,605.00
 ───────────────────────────────────────────────────
-Move to savings                            4,415.67
+Move to savings today                      4,510.67
+
+Another 1,605.00 frees up on Fri Nov 13, when Paycheck lands.
 ```
+
+Checking bottoms out at 5,010.67 on Nov 12, after Amazon and before the paycheck, so
+5,010.67 − 500.00 can move today. Once the paycheck lands, nothing later takes checking below
+6,615.67, so another 1,605.00 frees up. The `Not free until` line makes the column add up.
 
 Use `rich` (or plain text) for the table. Warnings print above the result in a different color.
 
@@ -119,7 +154,6 @@ pyproject.toml   # entry point `sweep = sweep.cli:main`
 
 ```toml
 cushion = 500.00
-payday  = 1          # day of month the salary lands; drives the payments window
 
 [[accounts]]
 name = "Checking"
@@ -131,11 +165,13 @@ name = "Amex Platinum"
 role = "card"
 simplefin_id = "ACT-..."
 statement_day = 15             # day of month the statement closes (ask me); see 6
+due_day = 9                    # day of month autopay pulls the statement balance
 
 [[accounts]]
 name = "Amazon credit"
 role = "card"
 source = "manual"              # not connected; prompt for it each run
+due_day = 12
 
 [[accounts]]
 name = "Old savings"
@@ -145,10 +181,17 @@ role = "ignore"                # shown by `sweep accounts`, never counted
 name = "Utilities"
 amount = 95.00
 due_day = 15
+
+[[income]]
+name = "Paycheck"
+amount = 1700.00               # usual amount; --manual lets me correct it per run
+every = "2 weeks"              # "week", "2 weeks", "month" or "once"
+day = 2026-11-13               # "week": a weekday ("friday"); "month": 1-31;
+                               # "2 weeks": any one payday; "once": the date
 ```
 
-Cards fetched from SimpleFIN need `statement_day`; manual cards don't. Optional per-account
-key: `invert_sign = true` (see 6).
+Every card needs `due_day`; cards fetched from SimpleFIN also need `statement_day`. Optional
+per-account key: `invert_sign = true` (see 6).
 
 ### Calculation details (`calc.py`)
 
@@ -156,18 +199,26 @@ key: `invert_sign = true` (see 6).
 - Card owed amount is never negative: a card with a credit balance counts as $0 owed.
 - Working out a card's unpaid statement balance from fetched data (6, step 5) is a pure function
   here too.
-- Payments window: include a payment if its next due date falls on or after today and before the
-  next payday. Clamp `due_day` / `payday` to the month's last day (e.g. 31 → Feb 28/29).
-  A payment due today may already have cleared; support `--skip NAME` to drop it for this run.
-- Return a result object with every line item, the totals, `status` (`ok`/`cushion`/`short`)
-  and the amount, so the CLI and `--json` share one source of truth.
+- Horizon: today through the latest next due date among cards and payments. Each card and
+  payment counts once, on its next due date on or after today. Clamp `due_day` to the month's
+  last day (e.g. 31 → Feb 28/29). A payment due today may already have cleared; support
+  `--skip NAME` to drop it for this run.
+- Income: work out each landing from `every` and `day`. Weekly lands on that weekday, monthly
+  on that day (clamped like `due_day`), and every 2 weeks on dates 14 days apart from `day`,
+  before or after it. It counts on each date after today that falls within the horizon. A
+  one-off counts once; past one-offs are ignored, and `sweep list` marks them so I can remove
+  them.
+- Return a result object with every line item, the totals, the lowest balance and its date,
+  today's amount, the amount that frees up later and its date, and `status`
+  (`ok`/`cushion`/`short`), so the CLI and `--json` share one source of truth.
 
 ## 5. Phase 1: manual mode (build first)
 
 `sweep --manual` prompts for checking and each card's unpaid statement balance in config
 order, accepts input like `$1,240.18` or `-1240.18` (a minus sign on a card is ignored), then
-prints the same output.
-Accounts with `source = "manual"` use these prompts even in normal mode.
+prints the same output. It also shows each deposit in the horizon with its configured amount;
+Enter keeps it, or I type what actually came in. Accounts with `source = "manual"` use these
+prompts even in normal mode.
 
 ## 6. Phase 2: automatic balances via SimpleFIN Bridge
 
@@ -208,11 +259,11 @@ Bilt can be connected. Anything that can't is just `source = "manual"`.
   manual prompt.
 - A card payment pending in checking: the money may be subtracted twice. Print a reminder
   if a transaction description in checking matches a card name in the last 3 days.
-- Result `short`: print the shortfall and which upcoming payments it threatens.
+- Result `short`: print the shortfall, the day it happens, and which payments it threatens.
 
 ## 8. Phase 3 (optional): run itself on the 1st and ping my phone
 
-- `sweep --json | sweep notify` sends a one-line push ("Move $4,415.67 to savings") via
+- `sweep --json | sweep notify` sends a one-line push ("Move $4,510.67 to savings") via
   ntfy.sh or Pushover (ask me which). Put the topic or key in `keyring`, not config.
 - Schedule it on the 1st at 9:00 AM with launchd (macOS) or Task Scheduler (Windows), whichever
   my laptop runs. Write the plist/task file and the install command; don't install it without
@@ -228,15 +279,24 @@ Bilt can be connected. Anything that can't is just `source = "manual"`.
 
 ## 10. Tests (pytest)
 
-- `calc`: the example above gives exactly 4,415.67; `cushion` and `short` states; credit
-  balance on a card counts as $0; Decimal rounding (no float drift on values like 0.1 + 0.2).
+- `calc`: the example above gives exactly 4,510.67 today and 1,605.00 more on Nov 13;
+  `cushion` and `short` states; credit balance on a card counts as $0; Decimal rounding (no
+  float drift on values like 0.1 + 0.2).
+- Timing: checking 4,300, statements 4,300 due Nov 9 and a 1,700 paycheck on Nov 6 gives
+  1,700. The same paycheck on Nov 10, with 3,000 due Nov 9 and 1,300 due Nov 12, gives 1,300
+  today and 400 more on Nov 10. With checking 1,000 instead, it's `short` by 2,000 on Nov 9.
+  A deposit dated today isn't counted, and on a shared day the payment goes first.
 - Unpaid statement balance: owed 1,500 with 300 of charges posted after the closing date gives
   1,200; a payment since the closing date lowers it; a statement already paid in full gives $0;
   `statement_day = 31` closes on Feb 28/29.
-- Payments window: today Nov 1 with payday 1 includes a payment due Nov 15 and excludes Dec 2;
-  today Jan 30 with payday 1 includes a payment due Jan 31; `due_day = 31` in February.
+- Horizon: today Jan 30, `due_day = 31` falls on Jan 31 and `due_day = 2` on Feb 2;
+  `due_day = 31` in February falls on Feb 28/29; weekly on Friday, run on a Friday, starts next
+  Friday; an every-2-weeks `day` months in the past still lands on the right Fridays; a
+  paycheck after the last due date isn't counted.
 - Config: unknown role rejected; a missing `simplefin_id` without `source = "manual"` rejected;
-  a SimpleFIN card without `statement_day` rejected.
+  a SimpleFIN card without `statement_day` rejected; a card without `due_day` rejected; an
+  income `every` other than week, 2 weeks, month or once rejected, and a `day` that doesn't
+  fit its `every` rejected.
 - `add` / `rename` / `remove`: round-trip a config with comments and keep them; duplicate
   names rejected; removing an unknown name changes nothing; a `.bak` is written first.
 - SimpleFIN: parse the fixture JSON; sign normalization with and without `invert_sign`;
@@ -249,7 +309,7 @@ Bilt can be connected. Anything that can't is just `source = "manual"`.
 - `sweep --manual` works end to end with no account connected.
 - `sweep` prints a correct breakdown from my real SimpleFIN data, and the card numbers match
   each card app's statement balance, less any payment already made.
-- Adding or removing a card or payment is one command: `sweep add` / `sweep remove`.
+- Adding or removing a card, payment or income is one command: `sweep add` / `sweep remove`.
 - All tests pass with `pytest`.
 
 ## Out of scope
