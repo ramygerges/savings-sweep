@@ -9,8 +9,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600&display=swap">
 <style>
   /* Layout: one narrow phone-first column. The answer comes first (sweep amount and its math),
-     then grouped input lists that feed it, then why it works. A fixed bottom bar repeats the
-     answer once the result card scrolls out of view. */
+     then grouped input lists that feed it. A fixed bottom bar repeats the answer once the
+     result card scrolls out of view. */
   :root {
     --bg: #ECF0EE;
     --surface: #FFFFFF;
@@ -19,8 +19,6 @@
     --line: #D3DCD8;
     --accent: #0C6A4D;
     --accent-soft: #DCEEE6;
-    --warn: #8F5600;
-    --warn-soft: #F8ECD6;
     --bad: #B3261E;
     --font-display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
     --font-body: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -35,8 +33,6 @@
       --line: #28362F;
       --accent: #52C99E;
       --accent-soft: #163A2D;
-      --warn: #EDB463;
-      --warn-soft: #3A2A12;
       --bad: #F2897B;
       color-scheme: dark;
     }
@@ -49,8 +45,6 @@
     --line: #28362F;
     --accent: #52C99E;
     --accent-soft: #163A2D;
-    --warn: #EDB463;
-    --warn-soft: #3A2A12;
     --bad: #F2897B;
     color-scheme: dark;
   }
@@ -75,31 +69,21 @@
   }
 
   .eyebrow {
-    margin: 0 0 6px;
+    margin: 0;
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--muted);
   }
-  h1 {
-    margin: 0;
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: clamp(1.6rem, 6.5vw, 2.1rem);
-    line-height: 1.1;
-    letter-spacing: -0.01em;
-    text-wrap: balance;
-  }
-  h2, h3 {
+  h2 {
     margin: 0;
     font-family: var(--font-display);
     font-weight: 600;
+    font-size: 1.15rem;
     line-height: 1.2;
     text-wrap: balance;
   }
-  h2 { font-size: 1.15rem; }
-  h3 { font-size: 1rem; }
 
   /* Result card: the one element set off as an object */
   .result {
@@ -113,16 +97,6 @@
   }
   .result-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .result-label { font-size: 1rem; }
-  .chip {
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: var(--warn-soft);
-    color: var(--warn);
-  }
   .copy {
     margin-left: auto;
     font: inherit;
@@ -148,6 +122,7 @@
     user-select: all;
     overflow-wrap: anywhere;
   }
+  .result[data-state="empty"] .amount,
   .result[data-state="cushion"] .amount { color: var(--muted); }
   .result[data-state="short"] .amount { color: var(--bad); }
   .note { margin: 0; color: var(--muted); font-size: 0.9rem; max-width: 60ch; }
@@ -264,26 +239,6 @@
 
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* Why it works */
-  .why { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
-  .why h2 { padding-top: 20px; }
-  .why p { margin: 0; max-width: 60ch; }
-  .timeline { list-style: none; margin: 0; padding: 0; }
-  .timeline li {
-    display: grid;
-    grid-template-columns: 5.25rem minmax(0, 1fr);
-    gap: 12px;
-    padding: 10px 0;
-    border-top: 1px solid var(--line);
-  }
-  .timeline li:first-child { border-top: 0; }
-  .when {
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent);
-  }
-  .tips { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; color: var(--muted); max-width: 60ch; }
   .foot { color: var(--muted); font-size: 0.85rem; }
 
   /* Bottom bar and toast */
@@ -316,6 +271,7 @@
     font-variant-numeric: tabular-nums;
     color: var(--accent);
   }
+  .bar[data-state="empty"] .bar-amount,
   .bar[data-state="cushion"] .bar-amount { color: var(--muted); }
   .bar[data-state="short"] .bar-amount { color: var(--bad); }
   .toast {
@@ -353,22 +309,20 @@
 <main class="wrap">
   <header>
     <p class="eyebrow">Month-start savings sweep</p>
-    <h1>How much can I move to savings today?</h1>
   </header>
 
-  <section class="result" id="result" data-state="ok" aria-labelledby="resultLabel">
+  <section class="result" id="result" data-state="empty" aria-labelledby="resultLabel">
     <div class="result-head">
       <h2 class="result-label" id="resultLabel">Move to savings</h2>
-      <span class="chip" id="sampleChip">Example</span>
-      <button class="copy" id="copyBtn" type="button">Copy</button>
+      <button class="copy" id="copyBtn" type="button" hidden>Copy</button>
     </div>
-    <output class="amount" id="amount" aria-live="polite">$4,415.67</output>
-    <p class="note" id="note">These are example numbers. They clear as soon as you start typing your own.</p>
+    <output class="amount" id="amount" aria-live="polite">$0.00</output>
+    <p class="note" id="note" hidden></p>
     <dl class="math">
-      <div><dt>Checking</dt><dd id="mChecking">$6,850.00</dd></div>
-      <div><dt>Cards still to be paid</dt><dd id="mCards">−$1,839.33</dd></div>
-      <div><dt>Other payments</dt><dd id="mBills">−$95.00</dd></div>
-      <div><dt>Cushion you keep</dt><dd id="mCushion">−$500.00</dd></div>
+      <div><dt>Checking</dt><dd id="mChecking">$0.00</dd></div>
+      <div><dt>Cards still to be paid</dt><dd id="mCards">$0.00</dd></div>
+      <div><dt>Other payments</dt><dd id="mBills">$0.00</dd></div>
+      <div><dt>Cushion you keep</dt><dd id="mCushion">$0.00</dd></div>
     </dl>
   </section>
 
@@ -378,21 +332,21 @@
     <ul class="rows">
       <li class="row">
         <label class="row-label" for="checking">Available now</label>
-        <div class="money"><span>$</span><input class="amt" id="checking" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="6,850.00"></div>
+        <div class="money"><span>$</span><input class="amt" id="checking" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00"></div>
         <span></span>
       </li>
     </ul>
   </section>
 
   <section class="group" aria-labelledby="cardsTitle">
-    <div class="group-head"><h2 id="cardsTitle">Cards</h2><span class="sum" id="cardsSum">$1,839.33</span></div>
-    <p class="hint">Enter each card's <strong>current balance</strong> (some apps call it total balance), plus any pending charges. Skip the statement balance. A card you already paid off is $0.</p>
+    <div class="group-head"><h2 id="cardsTitle">Cards</h2><span class="sum" id="cardsSum">$0.00</span></div>
+    <p class="hint">Each card's unpaid <strong>statement balance</strong>.</p>
     <ul class="rows" id="cards"></ul>
     <button class="add" type="button" data-add="cards">+ Add card</button>
   </section>
 
   <section class="group" aria-labelledby="billsTitle">
-    <div class="group-head"><h2 id="billsTitle">Other payments</h2><span class="sum" id="billsSum">$95.00</span></div>
+    <div class="group-head"><h2 id="billsTitle">Other payments</h2><span class="sum" id="billsSum">$0.00</span></div>
     <p class="hint">Anything else paid straight from checking before your next paycheck, like a loan, a utility, or rent if it hasn't cleared yet.</p>
     <ul class="rows" id="bills"></ul>
     <button class="add" type="button" data-add="bills">+ Add payment</button>
@@ -400,11 +354,10 @@
 
   <section class="group" aria-labelledby="cushionTitle">
     <h2 id="cushionTitle">Cushion</h2>
-    <p class="hint">What you always want left in checking for surprises.</p>
     <ul class="rows">
       <li class="row">
         <label class="row-label" for="cushion">Keep at least</label>
-        <div class="money"><span>$</span><input class="amt" id="cushion" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="500.00"></div>
+        <div class="money"><span>$</span><input class="amt" id="cushion" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00"></div>
         <span></span>
       </li>
     </ul>
@@ -415,31 +368,13 @@
     <p>Tap a name to rename it, or × to remove it. Your list and cushion stay saved.</p>
   </div>
 
-  <section class="why" aria-labelledby="whyTitle">
-    <h2 id="whyTitle">Why it uses current balances</h2>
-    <p>A card's current balance is every charge you haven't paid yet. The statement balance stops at the closing date, which for a card due on the 9th is around the middle of last month, so it misses the last few weeks of spending. Subtracting current balances covers those weeks too, and you never have to work out which charge lands on which statement. It treats every card like a debit card.</p>
-    <h3>What happens to the money you leave in checking</h3>
-    <ol class="timeline">
-      <li><span class="when">1st</span><span>Rent and Bank of America are already paid. Enter today's balances and move the result to savings.</span></li>
-      <li><span class="when">9th–12th</span><span>Amex Platinum, Amex Gold and Amazon autopay their statement balances from the money still in checking.</span></li>
-      <li><span class="when">Next 1st</span><span>Charges made after those statements closed are still covered by what you left behind. Run it again.</span></li>
-    </ol>
-    <h3>Tips</h3>
-    <ul class="tips">
-      <li>Set every card's autopay to the full statement balance.</li>
-      <li>If an app lists pending charges apart from the balance, add them to that card's number.</li>
-      <li>A card payment that's still pending can show up in both checking and the card. Wait for it to clear, or count it once.</li>
-      <li>When you cancel the Amex in March, delete its row after the final payment posts.</li>
-    </ul>
-  </section>
-
   <footer class="foot">Your numbers are saved in this browser on this device only. Nothing is sent anywhere.</footer>
 </main>
 
-<div class="bar" id="bar" data-state="ok" hidden>
+<div class="bar" id="bar" data-state="empty" hidden>
   <div class="bar-inner">
     <span class="bar-label" id="barLabel">Move to savings</span>
-    <span class="bar-amount" id="barAmount">$4,415.67</span>
+    <span class="bar-amount" id="barAmount">$0.00</span>
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -451,19 +386,17 @@
 
   function defaults() {
     return {
-      sample: true,
-      checking: 685000,
-      cushion: 50000,
+      checking: null,
+      cushion: null,
       cards: [
-        { id: 'boa', name: 'Bank of America', cents: 0 },
-        { id: 'amex1', name: 'Amex Platinum', cents: 124018 },
-        { id: 'amex2', name: 'Amex Gold', cents: 38640 },
-        { id: 'amazon', name: 'Amazon credit', cents: 21275 },
-        { id: 'bilt', name: 'Bilt (rent)', cents: 0 }
+        { id: 'boa', name: 'Bank of America', cents: null },
+        { id: 'amex1', name: 'Amex Platinum', cents: null },
+        { id: 'amex2', name: 'Amex Gold', cents: null },
+        { id: 'amazon', name: 'Amazon credit', cents: null },
+        { id: 'bilt', name: 'Bilt (rent)', cents: null }
       ],
       bills: [
-        { id: 'rent', name: 'Rent, if unpaid', cents: null },
-        { id: 'util', name: 'Utilities (autopay)', cents: 9500, example: true }
+        { id: 'rent', name: 'Rent, if unpaid', cents: null }
       ]
     };
   }
@@ -475,6 +408,15 @@
         // The first version shipped placeholder Amex names
         const renamed = { 'Amex #1': 'Amex Platinum', 'Amex #2': 'Amex Gold' };
         s.cards.forEach((c) => { if (renamed[c.name]) c.name = renamed[c.name]; });
+        // Earlier versions opened with example numbers until you typed; drop any still saved
+        if (s.sample) {
+          s.checking = null;
+          if (s.cushion === 50000) s.cushion = null;
+          s.cards.forEach((c) => { c.cents = null; });
+          s.bills = s.bills.filter((b) => !b.example);
+          s.bills.forEach((b) => { b.cents = null; });
+          delete s.sample;
+        }
         return s;
       }
     } catch (e) {}
@@ -513,7 +455,7 @@
     const cushion = state.cushion || 0;
     const afterDue = checking - cards - bills;
     const sweep = afterDue - cushion;
-    const status = sweep > 0 ? 'ok' : afterDue >= 0 ? 'cushion' : 'short';
+    const status = state.checking == null ? 'empty' : sweep > 0 ? 'ok' : afterDue >= 0 ? 'cushion' : 'short';
     return { checking, cards, bills, cushion, afterDue, sweep, status };
   }
 
@@ -528,15 +470,16 @@
     $('mCushion').textContent = money(-r.cushion);
     $('cardsSum').textContent = money(r.cards);
     $('billsSum').textContent = money(r.bills);
-    $('sampleChip').hidden = !state.sample;
 
     let label, amount, note;
-    if (r.status === 'ok') {
+    if (r.status === 'empty') {
+      label = 'Move to savings';
+      amount = money(0);
+      note = '';
+    } else if (r.status === 'ok') {
       label = 'Move to savings';
       amount = money(r.sweep);
-      note = state.sample
-        ? 'These are example numbers. They clear as soon as you start typing your own.'
-        : 'This leaves ' + money(r.cards + r.bills) + ' for what is still due, plus your ' + money(r.cushion) + ' cushion.';
+      note = 'This leaves ' + money(r.cards + r.bills) + ' for what is still due, plus your ' + money(r.cushion) + ' cushion.';
     } else if (r.status === 'cushion') {
       label = 'Nothing to move yet';
       amount = money(0);
@@ -553,6 +496,7 @@
     $('amount').textContent = amount;
     $('barAmount').textContent = amount;
     $('note').textContent = note;
+    $('note').hidden = !note;
     $('copyBtn').hidden = r.status !== 'ok';
   }
 
@@ -560,7 +504,6 @@
     const li = document.createElement('li');
     li.className = 'row';
     li.dataset.id = r.id;
-    if (r.example) li.dataset.example = '1';
     const noun = kind === 'cards' ? 'Card' : 'Payment';
 
     const name = document.createElement('input');
@@ -584,7 +527,7 @@
     amt.autocomplete = 'off';
     amt.placeholder = '0.00';
     amt.value = toInput(r.cents);
-    amt.setAttribute('aria-label', (r.name || noun) + (kind === 'cards' ? ' current balance' : ' amount'));
+    amt.setAttribute('aria-label', (r.name || noun) + (kind === 'cards' ? ' statement balance' : ' amount'));
     wrap.append(sign, amt);
 
     const del = document.createElement('button');
@@ -669,26 +612,16 @@
     el.addEventListener('blur', () => { el.value = toInput(state[key]); });
   });
 
-  // Clears balances in place (without re-rendering) so a field being focused keeps focus.
+  // Clears balances but keeps the list of names and the cushion.
   function clearAmounts() {
-    state.sample = false;
     state.checking = null;
     state.cards.forEach((c) => { c.cents = null; });
-    state.bills = state.bills.filter((b) => !b.example);
     state.bills.forEach((b) => { b.cents = null; });
     save();
     $('checking').value = '';
     document.querySelectorAll('#cards .amt, #bills .amt').forEach((i) => { i.value = ''; });
-    document.querySelectorAll('#bills li[data-example]').forEach((li) => li.remove());
-    if (!state.bills.length) renderList('bills');
     update();
   }
-
-  document.addEventListener('focusin', (e) => {
-    if (!state.sample) return;
-    const t = e.target;
-    if (t.classList && t.classList.contains('amt') && t.id !== 'cushion') clearAmounts();
-  });
   $('clearBtn').addEventListener('click', clearAmounts);
 
   let toastTimer;

@@ -16,18 +16,17 @@ statement balance by hand is tedious and error-prone.
 
 ```
 safe_to_move = checking_available
-             − sum(current balance of every card)
+             − sum(unpaid statement balance of every card)
              − sum(other payments made from checking before the next payday)
              − cushion
 ```
 
-- Use each card's **current balance** (posted + pending charges), **not** the statement
-  balance. The current balance includes every unpaid charge, whether it landed on the last
-  statement or came after it. This treats every card like a debit card: a charge counts against
-  checking the moment it's made, so statement closing dates never matter.
+- Use each card's **unpaid statement balance**: the last statement's balance minus any payments
+  made since it closed. That's exactly what the Amex/Amazon autopays pull from checking on the
+  9th/12th.
+- Charges made after a statement closed are left out. They land on next month's statement and
+  come out of next month's pay.
 - Cards already paid (Bank of America, usually Bilt) simply show $0.
-- The money left in checking is what the Amex/Amazon autopays (statement balance) draw from on
-  the 9th/12th. Charges made after those statements closed stay covered until next month.
 - Three outcomes:
   - `ok`: result > 0. Move that amount.
   - `cushion`: checking covers cards and other payments, but not the cushion. Move nothing.
@@ -44,7 +43,7 @@ safe_to_move = checking_available
 | Amazon credit account | card     | after the 1st            | Issuer may be Synchrony. Might not connect through an aggregator, so it may need manual entry. |
 | Bilt                  | card     | rent only                | Include it anyway; normally $0.                        |
 
-Ask me each card's exact due day before writing my real config.
+Ask me each card's statement closing day and due day before writing my real config.
 
 This list will change: cards get opened and cancelled, and I may add other payment
 destinations like a loan. Adding or removing one must be a single command (see 4), never a
@@ -131,6 +130,7 @@ simplefin_id = "ACT-..."       # copied from `sweep accounts`
 name = "Amex Platinum"
 role = "card"
 simplefin_id = "ACT-..."
+statement_day = 15             # day of month the statement closes (ask me); see 6
 
 [[accounts]]
 name = "Amazon credit"
@@ -147,12 +147,15 @@ amount = 95.00
 due_day = 15
 ```
 
-Optional per-account keys: `invert_sign = true` (see 6), `add_pending = true` (see 6).
+Cards fetched from SimpleFIN need `statement_day`; manual cards don't. Optional per-account
+key: `invert_sign = true` (see 6).
 
 ### Calculation details (`calc.py`)
 
 - Money is `Decimal` (or integer cents) everywhere. Never `float`.
 - Card owed amount is never negative: a card with a credit balance counts as $0 owed.
+- Working out a card's unpaid statement balance from fetched data (6, step 5) is a pure function
+  here too.
 - Payments window: include a payment if its next due date falls on or after today and before the
   next payday. Clamp `due_day` / `payday` to the month's last day (e.g. 31 → Feb 28/29).
   A payment due today may already have cleared; support `--skip NAME` to drop it for this run.
@@ -161,8 +164,9 @@ Optional per-account keys: `invert_sign = true` (see 6), `add_pending = true` (s
 
 ## 5. Phase 1: manual mode (build first)
 
-`sweep --manual` prompts for checking and each card in config order, accepts input like
-`$1,240.18` or `-1240.18` (a minus sign on a card is ignored), then prints the same output.
+`sweep --manual` prompts for checking and each card's unpaid statement balance in config
+order, accepts input like `$1,240.18` or `-1240.18` (a minus sign on a card is ignored), then
+prints the same output.
 Accounts with `source = "manual"` use these prompts even in normal mode.
 
 ## 6. Phase 2: automatic balances via SimpleFIN Bridge
@@ -175,17 +179,22 @@ here. In outline:
 1. `sweep setup`: I paste the setup token. It's base64; decode it to a claim URL, `POST` to it
    once, and get back an access URL with credentials embedded. Store the access URL with
    `keyring` (macOS Keychain / Windows Credential Manager). Never print or log it.
-2. Fetch `GET {access_url}/accounts`. Use the protocol's balances-only option if it exists;
-   otherwise a short `start-date` window to keep the response small. The bridge is rate-limited
-   (roughly a day's worth of requests), so cache the last response for 15 minutes.
+2. Fetch `GET {access_url}/accounts` with `start-date` set to the earliest card's last
+   statement closing date, since step 5 needs the transactions posted after it. The bridge is
+   rate-limited (roughly a day's worth of requests), so cache the last response for 15 minutes.
 3. Each account has an id, name, org, `balance`, `available-balance` and `balance-date`
-   (unix time). Use `available-balance` for checking when present.
+   (unix time). Use `available-balance` for checking when present. A card's `balance` is its
+   current balance; SimpleFIN has no statement balance, so step 5 works it out.
 4. **Sign convention:** card balances usually come back negative when I owe money. Don't assume
    it. Owed = `-balance` when negative, 0 otherwise, with `invert_sign = true` per account for
    institutions that report it the other way. `sweep accounts` must show raw balances so I can
    compare against my bank apps on the first run.
-5. **Pending charges:** some institutions leave them out of the balance. With
-   `add_pending = true`, fetch with `pending=1` and add that account's pending charges.
+5. **Unpaid statement balance:** owed (step 4) minus the charges posted after the last
+   statement closing date, floored at $0. The last closing date is the most recent
+   `statement_day` on or before today, clamped to the month's last day. Charges are
+   transactions that increase what I owe; payments and refunds since the closing date already
+   lowered the balance, so leave them in. Ignore pending transactions: they all came after the
+   statement closed.
 6. Show the protocol's `errors` array to me verbatim. It usually means a connection needs to
    be re-authenticated on the SimpleFIN site.
 
@@ -221,9 +230,13 @@ Bilt can be connected. Anything that can't is just `source = "manual"`.
 
 - `calc`: the example above gives exactly 4,415.67; `cushion` and `short` states; credit
   balance on a card counts as $0; Decimal rounding (no float drift on values like 0.1 + 0.2).
+- Unpaid statement balance: owed 1,500 with 300 of charges posted after the closing date gives
+  1,200; a payment since the closing date lowers it; a statement already paid in full gives $0;
+  `statement_day = 31` closes on Feb 28/29.
 - Payments window: today Nov 1 with payday 1 includes a payment due Nov 15 and excludes Dec 2;
   today Jan 30 with payday 1 includes a payment due Jan 31; `due_day = 31` in February.
-- Config: unknown role rejected; a missing `simplefin_id` without `source = "manual"` rejected.
+- Config: unknown role rejected; a missing `simplefin_id` without `source = "manual"` rejected;
+  a SimpleFIN card without `statement_day` rejected.
 - `add` / `rename` / `remove`: round-trip a config with comments and keep them; duplicate
   names rejected; removing an unknown name changes nothing; a `.bak` is written first.
 - SimpleFIN: parse the fixture JSON; sign normalization with and without `invert_sign`;
@@ -235,7 +248,7 @@ Bilt can be connected. Anything that can't is just `source = "manual"`.
 
 - `sweep --manual` works end to end with no account connected.
 - `sweep` prints a correct breakdown from my real SimpleFIN data, and the card numbers match
-  each card app's current balance.
+  each card app's statement balance, less any payment already made.
 - Adding or removing a card or payment is one command: `sweep add` / `sweep remove`.
 - All tests pass with `pytest`.
 
